@@ -1,0 +1,9 @@
+*.cmake
+*CMakeFiles*
+*.so
+problem_set_1/CMakeCache.txt
+cube
+problem_set_1/bin/test
+problem_set_1/lib/libutils.a
+problem_set_1/Makefile
+cube
