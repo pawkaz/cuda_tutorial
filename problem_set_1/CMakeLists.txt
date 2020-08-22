@@ -26,9 +26,9 @@ set(CUDA_NVCC_FLAGS_DEBUG ${CUDA_NVCC_FLAGS_DEBUG} "-G")
 
 set_property(TARGET utils  PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
-add_executable(test main.cpp)
+add_executable(app main.cpp)
 
-set_property(TARGET test  PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+set_property(TARGET app  PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 target_link_libraries(utils ${OpenCV_LIBS})
-target_link_libraries(test utils ${OpenCV_LIBS})
+target_link_libraries(app utils ${OpenCV_LIBS})
