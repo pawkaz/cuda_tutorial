@@ -55,10 +55,10 @@ void rgba_to_greyscale(const uchar4* const rgbaImage,
   auto idx = row * numCols + col;
 
   auto & pixel = rgbaImage[idx];
-  greyImage[idx] = (char)(float(pixel.x) * 0.299f + float(pixel.y) * 0.587f + float(pixel.z) * 0.114f);
-  
+  greyImage[idx] = (unsigned char)(float(pixel.x) * 0.299f + float(pixel.y) * 0.587f + float(pixel.z) * 0.114f);
+  }
 
-}
+
 
 void your_rgba_to_greyscale(const uchar4 * const h_rgbaImage, uchar4 * const d_rgbaImage,
                             unsigned char* const d_greyImage, size_t numRows, size_t numCols)
