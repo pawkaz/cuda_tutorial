@@ -80,10 +80,15 @@
 */
 
 #include "utils.h"
+#include <stdio.h>
 
 __global__
-void reduce_min(const float* const values, const size_t & length, float & min)
+void reduce_min(const float* const values, const size_t & length, float * d_temp)
 {
+   int id = threadIdx.x + blockIdx.x * blockDim.x;
+   int tid = threadIdx.x;
+
+   
 
 }
 
@@ -115,7 +120,20 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
        incoming d_cdf pointer which already has been allocated for you)       */
    
    float min = 0;
-   const size_t
-   reduce_min<<<1, 1>>>(d_logLuminance, numRows * numCols, min);
+   const size_t length = numRows * numCols;
+   int maxThreads = 1024;
+   int blocks = length / maxThreads / 2 + 1;
+
+   float * d_temp;
+   checkCudaErrors(cudaMalloc(&d_temp,  sizeof(float) * blocks));
+
+   std::cout << maxThreads << ' ' << blocks << std::endl;
+
+ 
+   reduce_min<<<blocks, maxThreads>>>(d_logLuminance, length, d_temp);
+   
+   
+   checkCudaErrors(cudaFree(d_temp));
+   cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
 }
