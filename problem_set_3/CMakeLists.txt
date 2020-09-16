@@ -9,6 +9,8 @@ set(LIBRARY_OUTPUT_PATH  ${CMAKE_BINARY_DIR}/lib)
 
 find_package(OpenCV REQUIRED)
 include_directories( ${OpenCV_INCLUDE_DIRS} )
+include_directories( /usr/local/cuda/include )
+
 
 add_library(utils STATIC
   compare.cpp

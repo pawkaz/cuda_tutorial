@@ -83,20 +83,130 @@
 #include <stdio.h>
 
 __global__
-void reduce_min(const float* const values, const size_t & length, float * d_temp)
+void reduce_min(const float* const values, float * d_out)
 {
-   int id = threadIdx.x + blockIdx.x * blockDim.x;
+   int id = (threadIdx.x + blockIdx.x * blockDim.x) * 2;
    int tid = threadIdx.x;
+   extern __shared__ float sdata[];
+   
+   sdata[tid] = min(values[id], values[id + 1]);
+   __syncthreads();
 
+   for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
+   {
+      if (tid < s)
+      {
+         auto & left = sdata[tid];
+         auto & right = sdata[tid + s];
+         left = min(left, right);
+
+         if (s > 1 and s & 1 == 1 and tid == s - 1)
+         {
+            auto & left_before = sdata[tid - 1];
+            left_before = max(left, left_before);
+         }
+      }
+
+
+       __syncthreads(); 
+   }
+
+   if (tid == 0)
+   {
+      d_out[blockIdx.x] = sdata[0];
+   }
    
 
 }
 
 __global__
-void reduce_max(const float* const values, const int & length)
+void reduce_max(const float* const values, float * d_out)
 {
+   int idx = (threadIdx.x + blockIdx.x * blockDim.x) * 2;
+   // if (gridDim.x == 1)
+   // {
+   //    printf("idx %d, tidx %d, v1=%f, b2=%f, max=%f\n",idx, threadIdx.x, values[idx], values[idx + 1], max(values[idx], values[idx + 1]));
+   // }
+   int tid = threadIdx.x;
+   extern __shared__ float sdata[];
+   
+   sdata[tid] = max(values[idx], values[idx + 1]);
+   __syncthreads();
+
+   for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
+   {
+      if (tid < s)
+      {
+         //  if (gridDim.x == 1)
+         // {
+         //    printf("idx %d, tidx %d, s=%d, v1=%f, b2=%f, max=%f\n",idx, threadIdx.x,s, sdata[tid], sdata[tid + s], max(sdata[tid], sdata[tid + s]));
+         // }
+
+         auto & left = sdata[tid];
+         auto & right = sdata[tid + s];
+         left = max(left, right);
+
+         if (s > 1 and s & 1 == 1 and tid == s - 1)
+         {
+            auto & left_before = sdata[tid - 1];
+            left_before = max(left, left_before);
+         }
+      } 
+       
+       __syncthreads();
+   }
+
+   if (tid == 0)
+   {
+      d_out[blockIdx.x] = sdata[0];
+   }
    
 }
+
+
+__global__
+void histogram(const float* const values, int * dout, const float max_value, const float min_value, const int bins)
+{
+   
+   int id = threadIdx.x + blockIdx.x * blockDim.x;
+   int bin = (values[id] - min_value) / (max_value - min_value) * (float) bins; 
+   atomicAdd(dout + bin, 1);
+   
+}
+
+
+__global__
+void scan_add(const int* const values, unsigned int * const dout, const int size)
+{
+   // dout[0] = 0;
+
+   // for (unsigned int i = 1; i < size;++i)
+   // {
+   //    dout[i] = values[i-1] + dout[i-1];
+   // }
+
+   external __shared__ int temp[];
+   int id = threadIdx.x + blockIdx.x * blockDim.x;
+   int tid = threadIdx.x;
+
+   temp[tid] = values[2 * id] + values[2 * id + 1];
+   int offset = 1;
+   
+   __sync_threads();
+
+   for(unsigned int s = blockDim.x/2; i>0; i>>=1)
+   {
+      if (tid < s)
+      {
+         
+      }
+   }
+
+   
+
+
+}
+
 
 
 
@@ -119,21 +229,48 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
        the cumulative distribution of luminance values (this should go in the
        incoming d_cdf pointer which already has been allocated for you)       */
    
-   float min = 0;
+   
    const size_t length = numRows * numCols;
-   int maxThreads = 1024;
-   int blocks = length / maxThreads / 2 + 1;
-
+   const int maxThreads = 1024;
+   const int blocks = length / maxThreads / 2;
+   
    float * d_temp;
    checkCudaErrors(cudaMalloc(&d_temp,  sizeof(float) * blocks));
 
-   std::cout << maxThreads << ' ' << blocks << std::endl;
-
- 
-   reduce_min<<<blocks, maxThreads>>>(d_logLuminance, length, d_temp);
+   reduce_min<<<blocks, maxThreads, maxThreads * sizeof(float)>>>(d_logLuminance, d_temp);   
+   reduce_min<<<1, blocks / 2, blocks / 2 * sizeof(float)>>>(d_temp, d_temp);
    
+   checkCudaErrors(cudaMemcpy(&min_logLum, d_temp, sizeof(float), cudaMemcpyDeviceToHost));
+
+   reduce_max<<<blocks, maxThreads, maxThreads * sizeof(float)>>>(d_logLuminance, d_temp);   
+   reduce_max<<<1, blocks / 2, blocks / 2 * sizeof(float)>>>(d_temp, d_temp);
+
+   checkCudaErrors(cudaMemcpy(&max_logLum, d_temp, sizeof(float), cudaMemcpyDeviceToHost));
    
    checkCudaErrors(cudaFree(d_temp));
+   
+   std::cout << "Min value: " << min_logLum << " Max value: " << max_logLum << std::endl;
+   // max_logLum = 2.18911;
+   int * d_bins;
+   checkCudaErrors(cudaMalloc(&d_bins,  sizeof(float) * numBins));
+   checkCudaErrors(cudaMemset(d_bins, 0, numBins*sizeof(float)));
+
+   histogram<<<blocks * 2, maxThreads>>>(d_logLuminance, d_bins, max_logLum, min_logLum, numBins);
+
+   int h_bins[numBins];
+
+   checkCudaErrors(cudaMemcpy(&h_bins, d_bins, numBins * sizeof(int), cudaMemcpyDeviceToHost));
+
+   // for (auto & bin: h_bins){
+   //    std::cout << bin << ' ';
+   // }
+   
+   // std::cout << std::endl;
+
+   scan_add<<<1,1>>>(d_bins, d_cdf, numBins);
+
+   checkCudaErrors(cudaFree(d_bins));
+
    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
 }
