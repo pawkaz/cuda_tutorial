@@ -183,12 +183,11 @@ void scan_add(const int* const values, unsigned int * const dout, const int size
    int id = threadIdx.x + blockIdx.x * blockDim.x;
    int tid = threadIdx.x;
 
-   int left_index = (1<<lvl) * id + (1<<lvl-1) - 1;
-   int right_index = (1<<lvl) * id + (1<<lvl) - 1;
+   int left_index = (1<<lvl + 1) * id + (1<<lvl) - 1;
+   int right_index = (1<<lvl + 1) * id + (1<<lvl + 1) - 1;
    
    temp[2 * tid] = values[left_index];
    temp[2 * tid + 1] = values[right_index];
-   
 
 
    for (unsigned int s=blockDim.x; s > 0; s>>=1)
@@ -198,8 +197,12 @@ void scan_add(const int* const values, unsigned int * const dout, const int size
       {
          int right_local_index = (1<<lvl) * tid + (1<<lvl) - 1;
          int left_local_index = (1<<lvl) * tid + (1<<lvl-1) - 1;
+
          printf("Block %d Idx %d lvl %d values %d and %d\n", blockIdx.x, tid, lvl, temp[(1<<lvl) * tid + (1<<lvl-1) - 1], temp[(1<<lvl) * tid + (1<<lvl) - 1]);
+
          temp[right_local_index] += temp[left_local_index];
+
+         
          int global_left_idx = (1<<lvl) * id + (1<<lvl-1) - 1;
          dout[global_left_idx] = temp[left_local_index];
          
@@ -288,7 +291,7 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
 
 
 
-   scan_add<<<1, 4, 4 * sizeof(int)>>>(d_test_data, d_cdf, numBins);
+   scan_add<<<2, 2, 2 * sizeof(int)>>>(d_test_data, d_cdf, numBins);
 
    checkCudaErrors(cudaFree(d_bins));
 
