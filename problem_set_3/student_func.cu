@@ -176,35 +176,48 @@ void histogram(const float* const values, int * dout, const float max_value, con
 
 
 __global__
-void scan_add(const int* const values, unsigned int * const dout, const int size)
+void scan_add(const int* const values, unsigned int * const dout, const int size, int lvl=0)
 {
-   // dout[0] = 0;
 
-   // for (unsigned int i = 1; i < size;++i)
-   // {
-   //    dout[i] = values[i-1] + dout[i-1];
-   // }
-
-   external __shared__ int temp[];
+   extern __shared__ int temp[];
    int id = threadIdx.x + blockIdx.x * blockDim.x;
    int tid = threadIdx.x;
 
-   temp[tid] = values[2 * id] + values[2 * id + 1];
-   int offset = 1;
+   int left_index = (1<<lvl) * id + (1<<lvl-1) - 1;
+   int right_index = (1<<lvl) * id + (1<<lvl) - 1;
    
-   __sync_threads();
+   temp[2 * tid] = values[left_index];
+   temp[2 * tid + 1] = values[right_index];
+   
 
-   for(unsigned int s = blockDim.x/2; i>0; i>>=1)
+
+   for (unsigned int s=blockDim.x; s > 0; s>>=1)
    {
+      ++lvl;
       if (tid < s)
       {
+         int right_local_index = (1<<lvl) * tid + (1<<lvl) - 1;
+         int left_local_index = (1<<lvl) * tid + (1<<lvl-1) - 1;
+         printf("Block %d Idx %d lvl %d values %d and %d\n", blockIdx.x, tid, lvl, temp[(1<<lvl) * tid + (1<<lvl-1) - 1], temp[(1<<lvl) * tid + (1<<lvl) - 1]);
+         temp[right_local_index] += temp[left_local_index];
+         int global_left_idx = (1<<lvl) * id + (1<<lvl-1) - 1;
+         dout[global_left_idx] = temp[left_local_index];
          
       }
+      __syncthreads();
    }
 
-   
+   // printf("Block %d Idx: %d, values: %d and %d\n",blockIdx.x, tid, temp[2 * tid], temp[2 * tid + 1]);
+   if (tid == 0)
+   {
+      int right_global_index = (1<<lvl) * id + (1<<lvl) - 1;
+      int right_local_index = (1<<lvl) * tid + (1<<lvl) - 1;
+      dout[right_global_index] = temp[right_local_index];
 
 
+      printf("Result for block %d %d %d %d %d %d %d %d %d\n", blockIdx.x, dout[0], dout[1], dout[2], dout[3], dout[4], dout[5], dout[6], dout[7]);
+
+   }
 }
 
 
@@ -267,7 +280,15 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
    
    // std::cout << std::endl;
 
-   scan_add<<<1,1>>>(d_bins, d_cdf, numBins);
+   int h_test_data[]{1, 2, 3, 4, 5, 6, 7, 8};
+   int * d_test_data;
+
+   checkCudaErrors(cudaMalloc(&d_test_data,  sizeof(int) * 8));
+   checkCudaErrors(cudaMemcpy(d_test_data, h_test_data, 8 * sizeof(int), cudaMemcpyHostToDevice));
+
+
+
+   scan_add<<<1, 4, 4 * sizeof(int)>>>(d_test_data, d_cdf, numBins);
 
    checkCudaErrors(cudaFree(d_bins));
 
