@@ -176,7 +176,7 @@ void histogram(const float* const values, int * dout, const float max_value, con
 
 
 __global__
-void scan_add(const int* const values, unsigned int * const dout, const int size, int lvl=0)
+void scan_add(const unsigned int* const values, unsigned int * const dout, unsigned int lvl=0)
 {
 
    extern __shared__ int temp[];
@@ -185,25 +185,26 @@ void scan_add(const int* const values, unsigned int * const dout, const int size
 
    int left_index = (1<<lvl + 1) * id + (1<<lvl) - 1;
    int right_index = (1<<lvl + 1) * id + (1<<lvl + 1) - 1;
-   
+   // printf("Copying left idx %d %d and right idx %d  %d\n ", left_index, values[left_index], right_index, values[right_index]);
    temp[2 * tid] = values[left_index];
    temp[2 * tid + 1] = values[right_index];
 
-
+   unsigned lvl_local = 0;
    for (unsigned int s=blockDim.x; s > 0; s>>=1)
    {
-      ++lvl;
+      ++lvl_local;
       if (tid < s)
       {
-         int right_local_index = (1<<lvl) * tid + (1<<lvl) - 1;
-         int left_local_index = (1<<lvl) * tid + (1<<lvl-1) - 1;
+         int right_local_index = (1<<lvl_local) * tid + (1<<lvl_local) - 1;
+         int left_local_index = (1<<lvl_local) * tid + (1<<lvl_local-1) - 1;
 
-         printf("Block %d Idx %d lvl %d values %d and %d\n", blockIdx.x, tid, lvl, temp[(1<<lvl) * tid + (1<<lvl-1) - 1], temp[(1<<lvl) * tid + (1<<lvl) - 1]);
+         // printf("Block %d Idx %d lvl %d  i/v %d %d and %d %d\n", blockIdx.x, tid, lvl_local, left_local_index, temp[left_local_index], right_local_index, temp[right_local_index]);
 
          temp[right_local_index] += temp[left_local_index];
 
-         
-         int global_left_idx = (1<<lvl) * id + (1<<lvl-1) - 1;
+
+         int global_left_idx = 2 * blockIdx.x * blockDim.x + (1<<lvl_local + lvl) * tid + (1<<lvl_local + lvl -1) - 1;
+         // printf("Save to global block %d threadIdx %d lvl %d  i/v %d %d\n", blockIdx.x, tid, lvl, global_left_idx, temp[left_local_index] );
          dout[global_left_idx] = temp[left_local_index];
          
       }
@@ -211,13 +212,14 @@ void scan_add(const int* const values, unsigned int * const dout, const int size
    }
 
    // printf("Block %d Idx: %d, values: %d and %d\n",blockIdx.x, tid, temp[2 * tid], temp[2 * tid + 1]);
+
    if (tid == 0)
    {
-      int right_global_index = (1<<lvl) * id + (1<<lvl) - 1;
-      int right_local_index = (1<<lvl) * tid + (1<<lvl) - 1;
+      int right_local_index = (1<<lvl_local) * tid + (1<<lvl_local) - 1;
+      int right_global_index = 2 * blockIdx.x * blockDim.x + (1<<lvl_local + lvl) * tid + (1<<lvl_local + lvl) - 1;
       dout[right_global_index] = temp[right_local_index];
 
-
+      printf("Save to global block %d threadIdx %d lvl %d  i/v %d %d\n", blockIdx.x, tid, lvl, right_global_index, temp[right_local_index] );
       printf("Result for block %d %d %d %d %d %d %d %d %d\n", blockIdx.x, dout[0], dout[1], dout[2], dout[3], dout[4], dout[5], dout[6], dout[7]);
 
    }
@@ -277,21 +279,16 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
 
    checkCudaErrors(cudaMemcpy(&h_bins, d_bins, numBins * sizeof(int), cudaMemcpyDeviceToHost));
 
-   // for (auto & bin: h_bins){
-   //    std::cout << bin << ' ';
-   // }
-   
-   // std::cout << std::endl;
+   unsigned int h_test_data[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+   unsigned int * d_test_data;
 
-   int h_test_data[]{1, 2, 3, 4, 5, 6, 7, 8};
-   int * d_test_data;
-
-   checkCudaErrors(cudaMalloc(&d_test_data,  sizeof(int) * 8));
-   checkCudaErrors(cudaMemcpy(d_test_data, h_test_data, 8 * sizeof(int), cudaMemcpyHostToDevice));
+   checkCudaErrors(cudaMalloc(&d_test_data,  sizeof(unsigned int) * 10));
+   checkCudaErrors(cudaMemcpy(d_test_data, h_test_data, 10 * sizeof(unsigned int), cudaMemcpyHostToDevice));
 
 
 
-   scan_add<<<2, 2, 2 * sizeof(int)>>>(d_test_data, d_cdf, numBins);
+   scan_add<<<2, 2, 2 * sizeof(int)>>>(d_test_data, d_cdf, 0);
+   scan_add<<<1, 1, 2 * sizeof(int)>>>(d_cdf, d_cdf, 2);
 
    checkCudaErrors(cudaFree(d_bins));
 
