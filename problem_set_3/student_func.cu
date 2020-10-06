@@ -176,38 +176,41 @@ void histogram(const float* const values, int * dout, const float max_value, con
 
 
 __global__
-void scan_add(const unsigned int* const values, unsigned int * const dout, unsigned int lvl=0)
+void scan_add_reduce(const unsigned int* const values, unsigned int * const dout, unsigned int step=0)
 {
 
    extern __shared__ int temp[];
    int id = threadIdx.x + blockIdx.x * blockDim.x;
    int tid = threadIdx.x;
 
-   int left_index = (1<<lvl + 1) * id + (1<<lvl) - 1;
-   int right_index = (1<<lvl + 1) * id + (1<<lvl + 1) - 1;
+   int left_index = (1<<step + 1) * id + (1<<step) - 1;
+   int right_index = (1<<step + 1) * id + (1<<step + 1) - 1;
    // printf("Copying left idx %d %d and right idx %d  %d\n ", left_index, values[left_index], right_index, values[right_index]);
    temp[2 * tid] = values[left_index];
    temp[2 * tid + 1] = values[right_index];
 
-   unsigned lvl_local = 0;
+   unsigned step_local = 0;
+   int right_local_index = 0;
+   int left_local_index = 0;
    for (unsigned int s=blockDim.x; s > 0; s>>=1)
    {
-      ++lvl_local;
+      ++step_local;
       if (tid < s)
       {
-         int right_local_index = (1<<lvl_local) * tid + (1<<lvl_local) - 1;
-         int left_local_index = (1<<lvl_local) * tid + (1<<lvl_local-1) - 1;
-
-         // printf("Block %d Idx %d lvl %d  i/v %d %d and %d %d\n", blockIdx.x, tid, lvl_local, left_local_index, temp[left_local_index], right_local_index, temp[right_local_index]);
+         right_local_index = (1<<step_local) * tid + (1<<step_local) - 1;
+         left_local_index = (1<<step_local) * tid + (1<<step_local-1) - 1;
 
          temp[right_local_index] += temp[left_local_index];
-
-
-         int global_left_idx = 2 * blockIdx.x * blockDim.x + (1<<lvl_local + lvl) * tid + (1<<lvl_local + lvl -1) - 1;
-         // printf("Save to global block %d threadIdx %d lvl %d  i/v %d %d\n", blockIdx.x, tid, lvl, global_left_idx, temp[left_local_index] );
+         
+         int global_left_idx = 2 * blockIdx.x * blockDim.x + (1<<step_local + step) * tid + (1<<step_local + step -1) - 1;
          dout[global_left_idx] = temp[left_local_index];
          
       }
+      else
+      {
+         return;
+      }
+      
       __syncthreads();
    }
 
@@ -215,14 +218,61 @@ void scan_add(const unsigned int* const values, unsigned int * const dout, unsig
 
    if (tid == 0)
    {
-      int right_local_index = (1<<lvl_local) * tid + (1<<lvl_local) - 1;
-      int right_global_index = 2 * blockIdx.x * blockDim.x + (1<<lvl_local + lvl) * tid + (1<<lvl_local + lvl) - 1;
+      int right_global_index = 2 * blockIdx.x * blockDim.x + (1<<step_local + step) * tid + (1<<step_local + step) - 1;
       dout[right_global_index] = temp[right_local_index];
 
-      printf("Save to global block %d threadIdx %d lvl %d  i/v %d %d\n", blockIdx.x, tid, lvl, right_global_index, temp[right_local_index] );
-      printf("Result for block %d %d %d %d %d %d %d %d %d\n", blockIdx.x, dout[0], dout[1], dout[2], dout[3], dout[4], dout[5], dout[6], dout[7]);
+      printf("Result for block %d: %d %d %d %d %d %d %d %d\n", blockIdx.x, dout[0], dout[1], dout[2], dout[3], dout[4], dout[5], dout[6], dout[7]);
 
    }
+} 
+
+__global__
+void scan_add_downsweep(const unsigned int* const values, unsigned int * const dout, unsigned int step=0)
+{
+   extern __shared__ int temp[];
+   int id = threadIdx.x + blockIdx.x * blockDim.x;
+   int tid = threadIdx.x;
+
+   int idx = id * 2 + 1;
+   // printf("Copying left idx %d %d and right idx %d  %d\n ", idx - (1 << step), values[idx - (1 << step)], idx, values[idx]);
+   temp[2 * tid] = values[idx - 1];
+   temp[2 * tid + 1] = values[idx];
+
+   __syncthreads();
+
+   unsigned int step_local = 0;
+
+   for (unsigned int s=1; s<(blockDim.x*2); s<<=1)
+   {
+      ++step_local;
+      int offset = blockDim.x>>step_local-1;
+      if (tid < s and offset > 0)
+      {
+         int right_idx = (blockDim.x - offset * tid) * 2 - 1;   
+         int left_idx =  right_idx - offset;
+         
+         int left_value = temp[left_idx];
+         bool is_right_zero = tid == s-1;
+         int right_value = (is_right_zero) ? 0 : temp[right_idx];
+         
+         // printf("Idx %d IDX L %d %d R %d %d\n", tid, left_idx, left_value, right_idx, right_value);
+         temp[right_idx] = left_value + right_value;
+         if (!is_right_zero)
+            temp[left_idx] = right_value;
+      }
+      
+      __syncthreads();
+      // if (tid == 0)
+         // printf("Result for id %d: %d %d %d %d %d %d %d %d\n", tid, temp[0], temp[1], temp[2], temp[3], temp[4], temp[5], temp[6], temp[7]);
+   }
+
+   dout[idx - 1] = temp[2 * tid];
+   dout[idx] = temp[2 * tid + 1];
+
+   if (tid == 0)
+      dout[0] = 0;
+   
+   
 }
 
 
@@ -287,9 +337,9 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
 
 
 
-   scan_add<<<2, 2, 2 * sizeof(int)>>>(d_test_data, d_cdf, 0);
-   scan_add<<<1, 1, 2 * sizeof(int)>>>(d_cdf, d_cdf, 2);
-
+   scan_add_reduce<<<1, 5, 5 * sizeof(int)>>>(d_test_data, d_cdf, 0);
+   // scan_add_reduce<<<1, 1, 2 * sizeof(int)>>>(d_cdf, d_cdf, 2);
+   scan_add_downsweep<<<1, 4, 8 * sizeof(int)>>>(d_cdf, d_cdf, 0);
    checkCudaErrors(cudaFree(d_bins));
 
    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
