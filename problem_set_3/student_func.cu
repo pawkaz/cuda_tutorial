@@ -221,7 +221,7 @@ void scan_add_reduce(const unsigned int* const values, unsigned int * const dout
       int right_global_index = 2 * blockIdx.x * blockDim.x + (1<<step_local + step) * tid + (1<<step_local + step) - 1;
       dout[right_global_index] = temp[right_local_index];
 
-      printf("Result for block %d: %d %d %d %d %d %d %d %d\n", blockIdx.x, dout[0], dout[1], dout[2], dout[3], dout[4], dout[5], dout[6], dout[7]);
+      // printf("Result for block %d: %d %d %d %d %d %d %d %d\n", blockIdx.x, dout[0], dout[1], dout[2], dout[3], dout[4], dout[5], dout[6], dout[7]);
 
    }
 } 
@@ -337,9 +337,9 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
 
 
 
-   scan_add_reduce<<<1, 5, 5 * sizeof(int)>>>(d_test_data, d_cdf, 0);
+   scan_add_reduce<<<1, 5, 2 * 5 * sizeof(int)>>>(d_test_data, d_cdf, 0);
    // scan_add_reduce<<<1, 1, 2 * sizeof(int)>>>(d_cdf, d_cdf, 2);
-   scan_add_downsweep<<<1, 4, 8 * sizeof(int)>>>(d_cdf, d_cdf, 0);
+   scan_add_downsweep<<<1, 4, 2 * 4 * sizeof(int)>>>(d_cdf, d_cdf, 0);
    checkCudaErrors(cudaFree(d_bins));
 
    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
